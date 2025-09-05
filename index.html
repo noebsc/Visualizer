@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Visualiseur Audio 20 modes</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ---------- RESET ---------- */
+*,*:before,*:after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#0d0d0d;font-family:'Poppins',sans-serif;overflow:hidden;color:#f3f3f3}
+
+/* ---------- CANVAS ---------- */
+canvas{position:absolute;inset:0;width:100%;height:100%}
+
+/* ---------- START BUTTON ---------- */
+#startBtn{
+  position:absolute;inset:0;margin:auto;padding:1.1rem 2.4rem;
+  font-size:1.3rem;font-weight:600;border:none;border-radius:50px;
+  background:linear-gradient(135deg,#29d8ff,#8f00ff);color:#fff;
+  box-shadow:0 4px 30px #0006;cursor:pointer;transition:transform .4s,opacity 4s;
+  width:190px;height:64px;z-index:30
+}
+#startBtn:hover{transform:scale(1.05)}
+#startBtn.fade{opacity:0;pointer-events:none}
+
+/* ---------- CONTROLS PANEL ---------- */
+#controls{
+  position:fixed;left:50%;bottom:20px;transform:translateX(-50%);
+  display:flex;align-items:center;gap:1rem;padding:.8rem 1.2rem;
+  backdrop-filter:blur(14px) saturate(180%);background:#ffffff0d;
+  border:1px solid #ffffff26;border-radius:14px;box-shadow:0 8px 32px #0006;
+  transition:opacity 1s ease 3s; /* commence à s’estomper après 3 s */
+  z-index:20;
+}
+#controls.hide{opacity:0;pointer-events:none}
+#controls:hover{opacity:1 !important;transition:opacity .3s}
+
+/* Champs */
+select, input[type=color], input[type=range]{
+  background:#1b1b1b;border:1px solid #444;border-radius:8px;
+  color:#f3f3f3;padding:.4rem .6rem;font-size:.9rem;
+}
+label{display:flex;align-items:center;gap:.4rem;font-size:.85rem}
+
+input[type=range]{width:120px}
+input[type=color]{padding:0;border:none;width:38px;height:38px}
+
+/* ---------- RANGE STYLES ---------- */
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:#29d8ff;border:2px solid #fff;cursor:ew-resize
+}
+input[type=range]::-moz-range-thumb{
+  width:14px;height:14px;border-radius:50%;background:#29d8ff;border:none;cursor:ew-resize
+}
+
+/* ---------- MEDIA QUERY ---------- */
+@media(max-width:680px){
+  #controls{flex-direction:column;gap:.6rem}
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<button id="startBtn">🎧 Démarrer</button>
+
+<!-- Panneau -->
+<div id="controls" class="hide">
+  <label>
+    <select id="visSelect"></select>
+  </label>
+  <label>Couleur <input type="color" id="color"></label>
+  <label>Taille <input type="range" id="size" min="2" max="40" value="8"></label>
+  <label>Densité <input type="range" id="density" min="32" max="512" step="16" value="128"></label>
+</div>
+
+<script>
+/* ---------------- VARIABLES GLOBALES ---------------- */
+const canvas=document.getElementById('canvas'),
+      ctx=canvas.getContext('2d'),
+      startBtn=document.getElementById('startBtn'),
+      controls=document.getElementById('controls'),
+      visSelect=document.getElementById('visSelect'),
+      colorPicker=document.getElementById('color'),
+      sizeRange=document.getElementById('size'),
+      densityRange=document.getElementById('density');
+
+let W=innerWidth,H=innerHeight;
+const onResize=()=>{W=canvas.width=innerWidth;H=canvas.height=innerHeight};
+addEventListener('resize',onResize);onResize();
+
+/* ----------- Audio ----------- */
+let audioCtx,analyser,dataArray;
+
+/* ----------- Configuration utilisateur ----------- */
+const cfg={color:'#29d8ff',size:8,density:128,mode:0};
+colorPicker.value=cfg.color;
+colorPicker.oninput=e=>cfg.color=e.target.value;
+sizeRange.oninput=e=>cfg.size=+e.target.value;
+densityRange.oninput=e=>cfg.density=+e.target.value;
+visSelect.onchange=e=>cfg.mode=+e.target.value;
+
+/* ---------- Définition des visualisations ---------- */
+const modes=[];
+const add=(name,fn)=>{modes.push(fn);visSelect.add(new Option(name,modes.length-1))};
+
+/* 1 Barres */
+add('Barres',d=>{
+  const bw=W/cfg.density;
+  ctx.fillStyle=cfg.color;
+  for(let i=0;i<cfg.density;i++){
+    const val=d[i]/255,h=val*H;
+    ctx.fillRect(i*bw,H-h,bw*0.9,h);
+  }
+});
+/* 2 Barres miroir */
+add('Barres miroir',d=>{
+  const bw=W/cfg.density;
+  ctx.fillStyle=cfg.color;
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255,h=v*H/2;
+    ctx.fillRect(i*bw,H/2-h,bw*0.85,h);
+    ctx.fillRect(i*bw,H/2,bw*0.85,h);
+  }
+});
+/* 3 Cercles radiaux */
+add('Cercle radial',d=>{
+  const rBase=Math.min(W,H)/4,cx=W/2,cy=H/2;
+  ctx.lineWidth=cfg.size;ctx.strokeStyle=cfg.color;ctx.beginPath();
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255,ang=i/cfg.density*2*Math.PI;
+    const r=rBase+v*120;
+    ctx.lineTo(cx+Math.cos(ang)*r,cy+Math.sin(ang)*r);
+  }
+  ctx.closePath();ctx.stroke();
+});
+/* 4 Rond de points */
+add('Anneau de points',d=>{
+  const cx=W/2,cy=H/2,base=Math.min(W,H)/5;
+  ctx.fillStyle=cfg.color;
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255,ang=i/cfg.density*2*Math.PI,r=base+v*100;
+    ctx.beginPath();ctx.arc(cx+Math.cos(ang)*r,cy+Math.sin(ang)*r,cfg.size*v+2,0,6.283);ctx.fill();
+  }
+});
+/* 5 Vague horizontale */
+add('Vague',d=>{
+  ctx.lineWidth=cfg.size;ctx.strokeStyle=cfg.color;ctx.beginPath();
+  for(let i=0;i<cfg.density;i++){
+    const x=i/cfg.density*W,y=H/2+(d[i]-128)*1.5;
+    if(i)ctx.lineTo(x,y);else ctx.moveTo(x,y);
+  }
+  ctx.stroke();
+});
+/* 6 LED matrix */
+add('LED Matrix',d=>{
+  const cols=Math.sqrt(cfg.density)|0,size=Math.min(W,H)/cols;
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255, x=(i%cols)*size, y=(i/cols|0)*size;
+    ctx.fillStyle=`${cfg.color}${(v*255|0).toString(16).padStart(2,'0')}`;
+    ctx.fillRect(x,y,size-1,size-1);
+  }
+});
+/* 7 Sun rays */
+add('Rayons',d=>{
+  const cx=W/2,cy=H/2;base=20;
+  ctx.lineWidth=cfg.size*.5;ctx.strokeStyle=cfg.color;
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255,ang=i/cfg.density*2*Math.PI;
+    const r=base+v*(Math.min(W,H)/2);
+    ctx.beginPath();ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+Math.cos(ang)*r,cy+Math.sin(ang)*r);
+    ctx.stroke();
+  }
+});
+/* 8 Electrocardio */
+add('Électrocardiogramme',d=>{
+  ctx.lineWidth=cfg.size;ctx.strokeStyle=cfg.color;ctx.beginPath();
+  for(let i=0;i<cfg.density;i++){
+    const x=i/cfg.density*W,y=H/2-(d[i]-128)*2.5;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.stroke();
+});
+/* 9 Spirale */
+add('Spirale',d=>{
+  const cx=W/2,cy=H/2,maxR=Math.min(W,H)/2;
+  ctx.lineWidth=cfg.size*.6;ctx.strokeStyle=cfg.color;ctx.beginPath();
+  for(let i=0;i<cfg.density;i++){
+    const t=i/cfg.density*8*Math.PI;
+    const r=d[i]/255*maxR;
+    ctx.lineTo(cx+Math.cos(t)*r,cy+Math.sin(t)*r);
+  }
+  ctx.stroke();
+});
+/* 10 Blob liquide */
+add('Blob',d=>{
+  ctx.fillStyle=`${cfg.color}55`;
+  const cx=W/2,cy=H/2,base=60;
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255,ang=i/cfg.density*2*Math.PI;
+    const r=base+v*150;
+    ctx.beginPath();ctx.arc(cx+Math.cos(ang)*r,cy+Math.sin(ang)*r,cfg.size*1.5,0,6.283);
+    ctx.fill();
+  }
+});
+/* 11 Anneaux */
+add('Anneaux',d=>{
+  const cx=W/2,cy=H/2;
+  for(let i=0;i<cfg.density/2;i++){
+    const v=d[i]/255,r=i*cfg.size*1.2+v*40;
+    ctx.lineWidth=cfg.size*.4;ctx.strokeStyle=cfg.color;
+    ctx.beginPath();ctx.arc(cx,cy,r,0,6.283);ctx.stroke();
+  }
+});
+/* 12 Points orbitaux */
+add('Orbite',d=>{
+  const cx=W/2,cy=H/2;
+  ctx.fillStyle=cfg.color;
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255,ang=performance.now()/600+i,r=v*H/2;
+    ctx.fillRect(cx+Math.cos(ang)*r,cy+Math.sin(ang)*r,cfg.size,cfg.size);
+  }
+});
+/* 13 Montagnes */
+add('Montagnes',d=>{
+  ctx.fillStyle='#000d';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=cfg.color;
+  const step=W/(cfg.density/4);
+  for(let i=0;i<cfg.density;i+=4){
+    const v=d[i]/255,x=i/cfg.density*W,h=v*H/2;
+    ctx.beginPath();ctx.moveTo(x,H);ctx.lineTo(x+step/2,H-h);
+    ctx.lineTo(x+step,H);ctx.closePath();ctx.fill();
+  }
+});
+/* 14 Eventails */
+add('Eventails',d=>{
+  const cx=W/2,cy=H,r=W/2,sl=Math.PI/cfg.density;
+  ctx.fillStyle=cfg.color;
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255;
+    ctx.beginPath();ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,r*v,i*sl,-i*sl,true);
+    ctx.closePath();ctx.fill();
+  }
+});
+/* 15 Particules */
+add('Particules',d=>{
+  ctx.fillStyle='#0002';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=cfg.color;
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255,ang=Math.random()*6.283,r=v*H/2;
+    ctx.fillRect(W/2+Math.cos(ang)*r,H/2+Math.sin(ang)*r,cfg.size,cfg.size);
+  }
+});
+/* 16 Splash pixels */
+add('Splash pixel',d=>{
+  const img=ctx.createImageData(W,H);const c=parseInt(cfg.color.slice(1),16);
+  const r=(c>>16)&255,g=(c>>8)&255,b=c&255;
+  for(let i=0;i<img.data.length;i+=4){
+    const val=d[(i/4)%cfg.density]/255;
+    img.data[i]=r*val;img.data[i+1]=g*val;img.data[i+2]=b*val;img.data[i+3]=255*val;
+  }
+  ctx.putImageData(img,0,0);
+});
+/* 17 Piliers */
+add('Piliers',d=>{
+  const cols=Math.cbrt(cfg.density)|0,size=W/cols;
+  ctx.fillStyle=cfg.color;
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255,x=(i%cols)*size,y=(i/cols|0)*size,h=v*H/2;
+    ctx.fillRect(x,y+h,size-2,H-h);
+  }
+});
+/* 18 Polygon spikes */
+add('Polygone',d=>{
+  const cx=W/2,cy=H/2,base=Math.min(W,H)/4;
+  ctx.fillStyle=cfg.color;ctx.beginPath();
+  for(let i=0;i<cfg.density;i++){
+    const v=d[i]/255,ang=i/cfg.density*6.283,r=base+v*120;
+    i?ctx.lineTo(cx+Math.cos(ang)*r,cy+Math.sin(ang)*r):ctx.moveTo(cx+Math.cos(ang)*r,cy+Math.sin(ang)*r);
+  }
+  ctx.closePath();ctx.fill();
+});
+/* 19 Ligne néon */
+add('Ligne néon',d=>{
+  ctx.shadowBlur=20;ctx.shadowColor=cfg.color;
+  ctx.lineWidth=cfg.size;ctx.strokeStyle=cfg.color;ctx.beginPath();
+  for(let i=0;i<cfg.density;i++){
+    const x=i/cfg.density*W,y=H/2+(d[i]-128)*1.8;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.stroke();ctx.shadowBlur=0;
+});
+/* 20 Gradient bars */
+add('Barres dégradées',d=>{
+  const bw=W/cfg.density;
+  const grad=ctx.createLinearGradient(0,0,0,H);grad.addColorStop(0,cfg.color);grad.addColorStop(1,'#000');
+  ctx.fillStyle=grad;
+  for(let i=0;i<cfg.density;i++){
+    const h=d[i]/255*H;
+    ctx.fillRect(i*bw,H-h,bw*.9,h);
+  }
+});
+
+/* ----------- Boucle d’animation ----------- */
+function draw(){
+  requestAnimationFrame(draw);
+  if(!analyser)return;
+  analyser.getByteFrequencyData(dataArray);
+  ctx.fillStyle='rgba(0,0,0,.08)';ctx.fillRect(0,0,W,H); // traînée
+  modes[cfg.mode](dataArray);
+}
+
+/* ----------- Démarrage ----------- */
+startBtn.onclick=async()=>{
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    audioCtx=new (AudioContext||webkitAudioContext)();
+    analyser=audioCtx.createAnalyser();
+    analyser.fftSize=1024;
+    dataArray=new Uint8Array(analyser.frequencyBinCount);
+    const src=audioCtx.createMediaStreamSource(stream);
+    src.connect(analyser);
+
+    startBtn.classList.add('fade');
+    controls.classList.remove('hide'); // visible au début
+    setTimeout(()=>controls.classList.add('hide'),3000);
+
+    draw();
+  }catch(e){
+    alert("Micro refusé 😢");
+  }
+};
+
+/* Afficher temporairement les contrôles lorsqu’on approche la souris */
+let hideTimeout;
+document.addEventListener('mousemove',e=>{
+  const rect=controls.getBoundingClientRect();
+  const near=Math.abs(e.clientY-rect.top)<80; // zone d’approche
+  if(near){controls.classList.remove('hide');clearTimeout(hideTimeout);}
+  else if(!controls.classList.contains('hide')){
+    clearTimeout(hideTimeout);
+    hideTimeout=setTimeout(()=>controls.classList.add('hide'),800);
+  }
+});
+</script>
+</body>
+</html>
